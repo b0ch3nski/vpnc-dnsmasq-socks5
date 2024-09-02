@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-VPN_INTERFACE="tun123"
 RESOLV_CONF="/etc/resolv.conf"
 VPNC_CONF="/etc/vpnc/vpn.conf"
 DNS_CONF="/etc/dnsmasq.d/dns.conf"
@@ -39,6 +38,7 @@ if [ "${IPSEC_GATEWAY}" ] && [ "${IPSEC_ID}" ] && [ "${IPSEC_SECRET}" ] && [ "${
         iptables -A INPUT -s "${dns}/32" -p udp -m udp --sport 53 -m u32 --u32 "28 & 0x000F = 0x3" -j DROP
     done
 
+    : "${VPN_INTERFACE:=tun123}"
     cat << EOF > "${VPNC_CONF}"
 IPSec gateway ${IPSEC_GATEWAY}
 IPSec ID ${IPSEC_ID}
@@ -110,6 +110,13 @@ EOF
 
     # use REDSOCKS chain for all outgoing TCP connections made by microsocks user
     iptables -t nat -A OUTPUT -p tcp -m owner --uid-owner microsocks -j REDSOCKS
+
+    # start another instance of MicroSocks to handle connections that should not go through the proxy
+    : "${MICROSOCKS_NOPROXY_PORT:=1180}"
+    echo "==> Starting MicroSocks (proxy bypass)"
+    gosu nobody microsocks -i 0.0.0.0 -p ${MICROSOCKS_NOPROXY_PORT} &
+    wait_for_port ${MICROSOCKS_NOPROXY_PORT}
+    echo "==> MicroSocks (proxy bypass) started"
 fi
 
 : "${DNS_CACHE_SIZE:=10000}"

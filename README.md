@@ -29,6 +29,7 @@ docker run \
     --cap-add NET_ADMIN \
     --security-opt="no-new-privileges:true" \
     --publish 127.0.0.1:1080:1080/tcp \
+    --publish 127.0.0.1:1180:1180/tcp \
     --publish 127.0.0.1:53:53/udp \
     --volume "${HOME}/.config/hosts:/tmp/hosts:ro" \
     --env DEBUG="on" \
@@ -41,7 +42,7 @@ docker run \
     --env TOTP_KEY="xxxxxxxxxxxxxxxx" \
     --env PROXY_HOST="192.168.1.1" \
     --env PROXY_PORT="1080" \
-    b0ch3nski/vpnc-dnsmasq-socks5:v0.1
+    b0ch3nski/vpnc-dnsmasq-socks5:v0.2
 ```
 
 I recommend going through [init.sh](init.sh) for a better understanding how this works.
