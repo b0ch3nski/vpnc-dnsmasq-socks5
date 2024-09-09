@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.9.0
-FROM debian:bookworm-slim
+ARG DEBIAN_VERSION
+FROM debian:${DEBIAN_VERSION}-slim
 SHELL ["/bin/bash", "-Eeuo", "pipefail", "-c"]
 
 RUN apt-get update; \

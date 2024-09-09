@@ -42,7 +42,7 @@ docker run \
     --env TOTP_KEY="xxxxxxxxxxxxxxxx" \
     --env PROXY_HOST="192.168.1.1" \
     --env PROXY_PORT="1080" \
-    b0ch3nski/vpnc-dnsmasq-socks5:v0.2
+    b0ch3nski/vpnc-dnsmasq-socks5:latest
 ```
 
 I recommend going through [init.sh](init.sh) for a better understanding how this works.
