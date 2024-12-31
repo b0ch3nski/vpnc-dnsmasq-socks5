@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-set -Eeo pipefail
+set -eo pipefail
+[ "${DEBUG}" = "on" ] && set -x
 
 RESOLV_CONF="/etc/resolv.conf"
-VPNC_CONF="/etc/vpnc/vpn.conf"
 DNS_CONF="/etc/dnsmasq.d/dns.conf"
 
 wait_for_port() { while ! nc -z 127.0.0.1 ${1}; do sleep 0.5; done; }
@@ -10,6 +10,7 @@ get_resolv_nameserver() { awk '/^nameserver/ { print $2; exit }' "${RESOLV_CONF}
 curl_wrapper() { curl --insecure --location --silent --show-error --fail-with-body --max-time 10 --socks5-hostname "127.0.0.1:${MICROSOCKS_PORT}" --write-out "\n" "${1}"; }
 print_current_ip() { echo -e "==> Current public IP address:\n$(curl_wrapper "http://api.ipify.org")"; }
 
+trap 'echo "==> Exit signal received - goodbye!"; exit 0' INT TERM
 
 : "${MICROSOCKS_PORT:=1080}"
 echo "==> Starting MicroSocks"
@@ -20,11 +21,21 @@ echo "==> MicroSocks started"
 DNS_SERVERS=( $(echo ${MAIN_DNS:-$(get_resolv_nameserver)} ${EXTRA_DNS}) )
 echo -e "==> Got DNS servers:\n${DNS_SERVERS[@]}"
 
-# start VPNC when all required variables are set
+# determine VPN technology
 if [ "${IPSEC_GATEWAY}" ] && [ "${IPSEC_ID}" ] && [ "${IPSEC_SECRET}" ] && [ "${XAUTH_USER}" ] && [ "${XAUTH_PASS}" ]; then
-    print_current_ip
+    VPN_TYPE="vpnc"
+elif [ "${WG_ENDPOINT}" ] && [ "${WG_PRIVATE_KEY}" ] && [ "${WG_PUBLIC_KEY}" ] && [ "${WG_ADDRESS}" ]; then
+    VPN_TYPE="wireguard"
+fi
 
-    DEFAULT_ROUTE="$(ip -4 route | grep '^default' | head -1)"
+if [ "${VPN_TYPE}" ]; then
+    : "${VPN_INTERFACE:=tun123}"
+    print_current_ip
+fi
+
+if [ "${VPN_TYPE}" = "vpnc" ]; then
+    VPNC_CONF="/etc/vpnc/vpn.conf"
+    DEFAULT_ROUTE="$(ip -o -4 route show to default)"
     DEFAULT_GATEWAY="$(awk '{ print $3 }' <<< ${DEFAULT_ROUTE})"
     DEFAULT_INTERFACE="$(awk '{ print $5 }' <<< ${DEFAULT_ROUTE})"
 
@@ -38,7 +49,6 @@ if [ "${IPSEC_GATEWAY}" ] && [ "${IPSEC_ID}" ] && [ "${IPSEC_SECRET}" ] && [ "${
         iptables -A INPUT -s "${dns}/32" -p udp -m udp --sport 53 -m u32 --u32 "28 & 0x000F = 0x3" -j DROP
     done
 
-    : "${VPN_INTERFACE:=tun123}"
     cat << EOF > "${VPNC_CONF}"
 IPSec gateway ${IPSEC_GATEWAY}
 IPSec ID ${IPSEC_ID}
@@ -70,6 +80,28 @@ EOF
     echo -e "==> DNS server from VPNC:\n${VPNC_DNS}"
     DNS_SERVERS+=( $(echo ${VPNC_DNS}) )
 
+elif [ "${VPN_TYPE}" = "wireguard" ]; then
+    WG_CONF="/etc/wireguard/${VPN_INTERFACE}.conf"
+    cat << EOF > "${WG_CONF}"
+[Interface]
+PrivateKey = ${WG_PRIVATE_KEY}
+Address = ${WG_ADDRESS}
+MTU = ${WG_MTU:-1420}
+
+[Peer]
+PublicKey = ${WG_PUBLIC_KEY}
+AllowedIPs = ${WG_ALLOWED_IPS:-0.0.0.0/0}
+Endpoint = ${WG_ENDPOINT}
+PersistentKeepalive = 25
+EOF
+
+    echo "==> Starting WireGuard to '${WG_ENDPOINT}' as '${WG_ADDRESS}'..."
+    wg-quick up "${VPN_INTERFACE}"
+    echo "==> WireGuard started"
+    wg show "${VPN_INTERFACE}"
+fi
+
+if [ "${VPN_TYPE}" ]; then
     # handle traffic routed from outside of the container so it can be used as a gateway
     iptables -t nat -A POSTROUTING -o "${VPN_INTERFACE}" -j MASQUERADE
 fi
@@ -130,9 +162,10 @@ min-cache-ttl=${DNS_CACHE_TTL}
 max-cache-ttl=${DNS_CACHE_TTL}
 no-hosts
 no-resolv
-all-servers
 log-async=100
 EOF
+# in case of vpnc, query all DNS servers - public ones might be faster, but internal are still needed
+[ "${VPN_TYPE}" = "vpnc" ] && echo "all-servers" >> "${DNS_CONF}"
 [ -f "${ADDN_HOSTS_FILE}" ] && echo "addn-hosts=${ADDN_HOSTS_FILE}" >> "${DNS_CONF}"
 [ "${DEBUG}" = "on" ] && echo "log-queries=extra" >> "${DNS_CONF}"
 for dns in "${DNS_SERVERS[@]}"; do
@@ -155,8 +188,6 @@ print_current_ip
 echo -e "==> Current routing table:\n$(ip -4 route)"
 echo -e "==> Current iptables rules:\n$(iptables --list-rules)"
 echo -e "==> Current iptables NAT rules:\n$(iptables --table=nat --list-rules)"
-
-trap 'echo "==> Exit signal received - goodbye!"; exit 0' INT TERM
 
 while true; do
     curl_wrapper "${HEALTHCHECK_URL:-http://api.ipify.org}"

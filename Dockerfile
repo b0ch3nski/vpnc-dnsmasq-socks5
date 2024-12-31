@@ -1,10 +1,12 @@
-# syntax=docker/dockerfile:1.9.0
+# syntax=docker/dockerfile:1.12-labs
 ARG DEBIAN_VERSION
 FROM debian:${DEBIAN_VERSION}-slim
-SHELL ["/bin/bash", "-Eeuo", "pipefail", "-c"]
+SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 
 RUN apt-get update; \
     apt-get install -y --no-install-recommends --no-install-suggests \
+        ca-certificates \
+        wireguard-tools \
         netcat-openbsd \
         microsocks \
         iproute2 \
@@ -25,6 +27,6 @@ RUN apt-get update; \
 
 COPY init.sh /usr/local/bin/
 
-EXPOSE 53/udp 1080/tcp
+EXPOSE 53/udp 1080/tcp 1180/tcp
 
 CMD ["init.sh"]
